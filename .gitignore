@@ -1,0 +1,8 @@
+# executable
+cryptor 
+
+# test files
+input
+output
+restored
+test-data/
