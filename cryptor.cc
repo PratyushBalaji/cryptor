@@ -164,7 +164,96 @@ void encryptSafe(istream& f, ostream& o, const string& password) {
 }
 
 void decryptSafe(istream& f, ostream& o, const string& password) {
-	// to be implemented
+	// validate header
+	SerialisedHeader header {};
+	f.read(reinterpret_cast<char*>(header.data()), header.size()); // read 64-bytes of f into header
+	
+	auto ERR_invalidFile = [](string reason){
+		return runtime_error("Error: invalid Cryptor safe encrypted file (" + reason + ").\nIf this file encrypted in unsafe mode, retry with --unsafe.");
+	};
+	
+	if (f.gcount() != 64) throw ERR_invalidFile("no header");
+
+	auto idx = header.begin();
+
+	// sig check
+	if (!equal(FILE_SIG.begin(), FILE_SIG.end(), idx)) throw ERR_invalidFile("invalid signature");
+	idx += 7;
+
+	// schema version
+	if (!(header[0x07] == FORMAT_VERSION)) throw ERR_invalidFile("unsupported version");
+	idx += 1;
+
+	// load ops limit
+	unsigned long long operationsLimit = 0;
+	for (int i = 0; i < 8; ++i){
+		operationsLimit <<= 8; // shl one byte
+		operationsLimit |= *idx;
+		++idx;
+	}
+
+	// load mem limit
+	unsigned long long memoryLimit = 0;
+	for (int i = 0; i < 8; ++i){
+		memoryLimit <<= 8; // shl one byte
+		memoryLimit |= *idx;
+		++idx;
+	}
+
+	// v1 : only accept hardcoded limits
+	if ((operationsLimit != crypto_pwhash_OPSLIMIT_INTERACTIVE) || (memoryLimit != crypto_pwhash_MEMLIMIT_INTERACTIVE)) throw ERR_invalidFile("invalid argon2id params");
+
+	// copy salt
+	Salt salt{};
+	copy(idx, idx+16, salt.begin());
+	idx+=16;
+
+	// copy argon header
+	StreamHeader streamHeader{};
+	copy(idx, idx+24, streamHeader.begin());
+	idx+=24;
+
+	if (idx != header.end()) throw logic_error("Header parsing mismatch");
+
+	// run decryption
+	Key key = deriveKey(password, salt, operationsLimit, memoryLimit);
+	crypto_secretstream_xchacha20poly1305_state state;
+
+	if (crypto_secretstream_xchacha20poly1305_init_pull(&state, streamHeader.data(), key.data())) throw ERR_invalidFile("invalid stream header");
+
+	array<unsigned char, SAFE_CHUNK_SIZE + crypto_secretstream_xchacha20poly1305_ABYTES> cipherText {};
+	array<unsigned char, SAFE_CHUNK_SIZE> plainText {};
+	unsigned long long plainLen {};
+	bool authFinal = false;
+
+	while (f && !authFinal) {
+		f.read(reinterpret_cast<char*>(cipherText.data()), cipherText.size()); // write f to buffer
+		if (f.bad() || (f.fail() && !f.eof())) throw runtime_error("Unable to read stream");
+
+		unsigned long long bytesRead = f.gcount();
+		if (bytesRead < crypto_secretstream_xchacha20poly1305_ABYTES) throw ERR_invalidFile("invalid authentication");
+		
+		bool atFileEnd = f.eof() || (f.peek() == EOF);
+		if (f.bad()) throw runtime_error("Bad stream");
+
+		unsigned char tag{};
+
+		int pullFailed = crypto_secretstream_xchacha20poly1305_pull(&state, plainText.data(), &plainLen, &tag, cipherText.data(), bytesRead, header.data(), header.size());
+		if (pullFailed) throw runtime_error("ERROR: decryption failed (wrong password or corrupted file)");
+		
+		if (tag != crypto_secretstream_xchacha20poly1305_TAG_MESSAGE && tag != crypto_secretstream_xchacha20poly1305_TAG_FINAL) throw ERR_invalidFile("unsupported auth tag");
+
+		authFinal = (tag == crypto_secretstream_xchacha20poly1305_TAG_FINAL);
+
+		if (authFinal && !atFileEnd) throw ERR_invalidFile("data exists after final chunk");
+		if (!authFinal && atFileEnd) throw ERR_invalidFile("missing final chunk");
+
+		o.write(reinterpret_cast<const char*>(plainText.data()), plainLen);
+
+		if (!o) throw runtime_error("Unable to write decrypted file");
+	}
+
+	sodium_memzero(key.data(), key.size());
 }
 
 int main(int argc, char* argv[]) {
@@ -207,11 +296,6 @@ int main(int argc, char* argv[]) {
 		return 1;
 	}
 	
-	if (mode == Mode::Safe && operation == Operation::Decrypt) {
-        	cerr << "Error: safe mode decrypt is WIP." << endl;
-        	return 1;
-    	}
-
 	// pre-encryption validation
 	filesystem::path input_path {input};
 	filesystem::path output_path {output};
@@ -243,11 +327,16 @@ int main(int argc, char* argv[]) {
 	}
 
 	// encryption
-	if (mode == Mode::Safe){
-		if (operation == Operation::Encrypt) encryptSafe(f,o,password);
-		else decryptSafe(f,o,password);
-	} else {
-		encryptUnsafe(f,o,password); // involutive so encryption == decryption
+	try {
+		if (mode == Mode::Safe){
+			if (operation == Operation::Encrypt) encryptSafe(f,o,password);
+			else decryptSafe(f,o,password);
+		} else {
+			encryptUnsafe(f,o,password); // involutive so encryption == decryption
+		}
+	} catch (const exception& error) {
+		cerr << error.what() << endl;
+		return 1;
 	}
 
 	// post-encryption validation
