@@ -33,6 +33,9 @@ constexpr array<unsigned char, 7> FILE_SIG { // 7-byte magic
 };
 constexpr uint8_t FORMAT_VERSION = 0x01; // 1-byte version
 
+constexpr uint64_t V1_ARGON2_OPSLIMIT = 2; // derived from crypto_pwhash_OPSLIMIT_INTERACTIVE
+constexpr uint64_t V1_ARGON2_MEMLIMIT = 64ULL * 1024 * 1024; // derived from crypto_pwhash_MEMLIMIT_INTERACTIVE
+
 constexpr uint32_t SAFE_CHUNK_SIZE = 64 * 1024;
 constexpr size_t SECURE_HEADER_SIZE = 64;
 
@@ -41,8 +44,8 @@ constexpr Salt UNSAFE_SALT { // 16-byte hardcoded salt for simple involution / u
 };
 
 Key deriveKey(const string& password, const Salt& salt,
-	      uint64_t operationsLimit=crypto_pwhash_OPSLIMIT_INTERACTIVE,
-	      uint64_t memoryLimit=crypto_pwhash_MEMLIMIT_INTERACTIVE) {
+	      uint64_t operationsLimit,
+	      uint64_t memoryLimit) {
     	Key key {};
 
     	int result = crypto_pwhash(
@@ -67,7 +70,7 @@ void encryptUnsafe(istream& f, ostream& o, const string& password){
 	constexpr size_t CHUNK_SIZE = 64 * 1024;   // buffer size
 	constexpr uint64_t BLOCK_SIZE = 64;        // xchacha20 block size
 	
-	Key key = deriveKey(password, UNSAFE_SALT);
+	Key key = deriveKey(password, UNSAFE_SALT, V1_ARGON2_OPSLIMIT, V1_ARGON2_MEMLIMIT);
 	Nonce nonce {}; // empty nonce (zeros) for unsafe involution mode
 	
 	array<unsigned char, CHUNK_SIZE> input {};
@@ -99,8 +102,8 @@ void encryptUnsafe(istream& f, ostream& o, const string& password){
 }
 
 void encryptSafe(istream& f, ostream& o, const string& password) {
-	uint64_t operationsLimit = crypto_pwhash_OPSLIMIT_INTERACTIVE;
-	uint64_t memoryLimit = crypto_pwhash_MEMLIMIT_INTERACTIVE;
+	uint64_t operationsLimit = V1_ARGON2_OPSLIMIT;
+	uint64_t memoryLimit = V1_ARGON2_MEMLIMIT;
 	
 	Salt salt{};
 	randombytes_buf(salt.data(), salt.size()); // random salt
@@ -191,7 +194,7 @@ void decryptSafe(istream& f, ostream& o, const string& password) {
 	}
 
 	// v1 : only accept hardcoded limits
-	if ((operationsLimit != crypto_pwhash_OPSLIMIT_INTERACTIVE) || (memoryLimit != crypto_pwhash_MEMLIMIT_INTERACTIVE)) throw ERR_invalidFile("invalid argon2id params");
+	if ((operationsLimit != V1_ARGON2_OPSLIMIT) || (memoryLimit != V1_ARGON2_MEMLIMIT)) throw ERR_invalidFile("invalid argon2id params");
 
 	// copy salt
 	Salt salt{};
