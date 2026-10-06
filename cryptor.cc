@@ -112,7 +112,16 @@ void encryptSafe(istream& f, ostream& o, const string& password) {
 	crypto_secretstream_xchacha20poly1305_state state;
 	StreamHeader streamHeader {};
 
-	crypto_secretstream_xchacha20poly1305_init_push(&state, streamHeader.data(), key.data());
+	int initResult = crypto_secretstream_xchacha20poly1305_init_push(
+		&state,
+		streamHeader.data(),
+		key.data()
+	);
+
+	sodium_memzero(key.data(), key.size());
+
+	if (initResult != 0)
+		throw runtime_error("Could not initialize encryption stream");
 	
 	// construct cryptor header
 	SerialisedHeader header {};
@@ -153,7 +162,6 @@ void encryptSafe(istream& f, ostream& o, const string& password) {
 	}
 
 
-	sodium_memzero(key.data(), key.size());
 }
 
 void decryptSafe(istream& f, ostream& o, const string& password) {
@@ -212,7 +220,16 @@ void decryptSafe(istream& f, ostream& o, const string& password) {
 	Key key = deriveKey(password, salt, operationsLimit, memoryLimit);
 	crypto_secretstream_xchacha20poly1305_state state;
 
-	if (crypto_secretstream_xchacha20poly1305_init_pull(&state, streamHeader.data(), key.data())) throw ERR_invalidFile("invalid stream header");
+	int initResult = crypto_secretstream_xchacha20poly1305_init_pull(
+		&state,
+		streamHeader.data(),
+		key.data()
+	);
+
+	sodium_memzero(key.data(), key.size());
+
+	if (initResult != 0)
+		throw ERR_invalidFile("invalid secretstream header");
 
 	array<unsigned char, SAFE_CHUNK_SIZE + crypto_secretstream_xchacha20poly1305_ABYTES> cipherText {};
 	array<unsigned char, SAFE_CHUNK_SIZE> plainText {};
@@ -246,7 +263,6 @@ void decryptSafe(istream& f, ostream& o, const string& password) {
 		if (!o) throw runtime_error("Unable to write decrypted file");
 	}
 
-	sodium_memzero(key.data(), key.size());
 }
 
 int main(int argc, char* argv[]) {
