@@ -12,16 +12,6 @@
 
 using namespace std;
 
-enum class Mode {
-    Safe,
-    Unsafe
-};
-
-enum class Operation {
-    Encrypt,
-    Decrypt
-};
-
 using Key = array<unsigned char, crypto_stream_xchacha20_KEYBYTES>;       // 32-byte key
 using Salt = array<unsigned char, crypto_pwhash_SALTBYTES>;               // 16-byte salt
 using Nonce = array<unsigned char, crypto_stream_xchacha20_NONCEBYTES>;   // 24-byte nonce
@@ -169,7 +159,7 @@ void decryptSafe(istream& f, ostream& o, const string& password) {
 	f.read(reinterpret_cast<char*>(header.data()), header.size()); // read 64-bytes of f into header
 	
 	auto ERR_invalidFile = [](string reason){
-		return runtime_error("Error: invalid Cryptor safe encrypted file (" + reason + ").\nIf this file encrypted in unsafe mode, retry with --unsafe.");
+		return runtime_error("Error: invalid Cryptor safe encrypted file (" + reason + ").\nIf this file was encrypted in unsafe mode, retry with --unsafe.");
 	};
 	
 	if (f.gcount() != 64) throw ERR_invalidFile("no header");
@@ -260,7 +250,6 @@ int main(int argc, char* argv[]) {
 	// arg parser
 	CLI::App app {"Cryptor file encryption"};
 	
-	bool unsafe = false;
 	string input;
 	string output;
 	string password;
@@ -269,26 +258,19 @@ int main(int argc, char* argv[]) {
 	CLI::Option_group* operations = app.add_option_group("Operation");
 	bool encryptRequested = false;
 	bool decryptRequested = false;
+	bool unsafeRequested = false;
 	
 	operations->add_flag("-e,--encrypt", encryptRequested, "Encrypt a file");
 	operations->add_flag("-d,--decrypt", decryptRequested, "Decrypt a file");
-	operations->require_option(1); // exactly one of -e, -d is required
+	operations->add_flag("-u,--unsafe", unsafeRequested, "Use involutive file encryption (not as secure)");
+	operations->require_option(1); // exactly one of -e, -d, -u is required
 
 	// params
 	app.add_option("input", input, "Input file")->required();
 	app.add_option("output", output, "Output file")->required();
 	app.add_option("password", password, "Encryption password")->required();
 
-	// flags
-	app.add_flag("--unsafe", unsafe, "Use deterministic reversible encryption");
-
 	CLI11_PARSE(app, argc, argv);
-
-	// set op
-	Operation operation = encryptRequested ? Operation::Encrypt : Operation::Decrypt;
-
-	// set mode
-	Mode mode = unsafe ? Mode::Unsafe : Mode::Safe;
 
 	// keygen dep check
 	if (sodium_init() < 0) {
@@ -328,9 +310,10 @@ int main(int argc, char* argv[]) {
 
 	// encryption
 	try {
-		if (mode == Mode::Safe){
-			if (operation == Operation::Encrypt) encryptSafe(f,o,password);
-			else decryptSafe(f,o,password);
+		if (encryptRequested) {
+			encryptSafe(f,o,password);
+		} else if (decryptRequested) {
+			decryptSafe(f,o,password);
 		} else {
 			encryptUnsafe(f,o,password); // involutive so encryption == decryption
 		}
