@@ -89,6 +89,7 @@ For more information about the specific vulnerabilities, read [the unsafe mode s
 - [ ] docs: unsafe-mode security and limitations
 - [ ] feat: atomic file operations
 - [ ] feat: hidden interactive password input
+- [ ] feat: add optional unsafe-mode parameters
 - [ ] misc: guarantee key and stream-state cleanup on error
 - [ ] test: automated tests and v1 compatibility fixtures
 - [ ] test: cross platform compatibility
