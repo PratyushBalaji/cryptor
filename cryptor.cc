@@ -10,14 +10,19 @@
 #include <sodium.h> 	// encryption
 #include <CLI/CLI.hpp>  // arg handling
 
+#include "atomic_output.cc"
+#include "secure_memory.cc"
+
 using namespace std;
 
 using Key = array<unsigned char, crypto_stream_xchacha20_KEYBYTES>;       // 32-byte key
+using SecureKey = WipeOnDestruction<Key>;
 using Salt = array<unsigned char, crypto_pwhash_SALTBYTES>;               // 16-byte salt
 using Nonce = array<unsigned char, crypto_stream_xchacha20_NONCEBYTES>;   // 24-byte nonce
 
 // secure format variables (safe mode)
 using StreamHeader = array<unsigned char, crypto_secretstream_xchacha20poly1305_HEADERBYTES>;
+using SecretstreamState = WipeOnDestruction<crypto_secretstream_xchacha20poly1305_state>;
 using SerialisedHeader = array<unsigned char, 64>; // 64-byte header / file signature
 
 // header consists of : 	64-bytes
@@ -43,14 +48,14 @@ constexpr Salt UNSAFE_SALT { // 16-byte hardcoded salt for simple involution / u
 	'c', 'r', 'y', 'p', 't', 'o', 'r', '-', 's', 'a', 'l', 't', '-', '1', '.', '0'
 };
 
-Key deriveKey(const string& password, const Salt& salt,
+SecureKey deriveKey(const string& password, const Salt& salt,
 	      uint64_t operationsLimit,
 	      uint64_t memoryLimit) {
-    	Key key {};
+	SecureKey key {};
 
     	int result = crypto_pwhash(
-		key.data(), // raw array to contain key
-	        key.size(), // 32 bytes
+		key.get().data(), // raw array to contain key
+	        key.get().size(), // 32 bytes
 	        password.data(),
         	static_cast<unsigned long long>(password.size()),
 	        salt.data(), // random salt (publicly stored)
@@ -66,11 +71,12 @@ Key deriveKey(const string& password, const Salt& salt,
 	return key;
 }
 
-void encryptUnsafe(istream& f, ostream& o, const string& password){
+void encryptUnsafe(istream& f, AtomicOutput& o, const string& password){
 	constexpr size_t CHUNK_SIZE = 64 * 1024;   // buffer size
 	constexpr uint64_t BLOCK_SIZE = 64;        // xchacha20 block size
+	static_assert(CHUNK_SIZE % BLOCK_SIZE == 0);
 	
-	Key key = deriveKey(password, UNSAFE_SALT, V1_ARGON2_OPSLIMIT, V1_ARGON2_MEMLIMIT);
+	SecureKey key = deriveKey(password, UNSAFE_SALT, V1_ARGON2_OPSLIMIT, V1_ARGON2_MEMLIMIT);
 	Nonce nonce {}; // empty nonce (zeros) for unsafe involution mode
 	
 	array<unsigned char, CHUNK_SIZE> input {};
@@ -90,35 +96,34 @@ void encryptUnsafe(istream& f, ostream& o, const string& password){
 			bytesRead,
 			nonce.data(),
 			blockIndex, // keystream idx inc'd as read to avoid repetition
-			key.data()
+			key.get().data()
 		);
 
-		o.write(reinterpret_cast<const char*>(output.data()), bytesRead); // write xor-ed data to o
+		o.write(reinterpret_cast<const char*>(output.data()), static_cast<size_t>(bytesRead)); // write xor-ed data to o
 		
 		blockIndex += (bytesRead + BLOCK_SIZE - 1) / BLOCK_SIZE; // ++blockIndex depending on read bytes
 	}
 
-	sodium_memzero(key.data(), key.size()); // zero out key from ram
 }
 
-void encryptSafe(istream& f, ostream& o, const string& password) {
+void encryptSafe(istream& f, AtomicOutput& o, const string& password) {
 	uint64_t operationsLimit = V1_ARGON2_OPSLIMIT;
 	uint64_t memoryLimit = V1_ARGON2_MEMLIMIT;
 	
 	Salt salt{};
 	randombytes_buf(salt.data(), salt.size()); // random salt
 	
-	Key key = deriveKey(password, salt, operationsLimit, memoryLimit);
-	crypto_secretstream_xchacha20poly1305_state state;
+	SecureKey key = deriveKey(password, salt, operationsLimit, memoryLimit);
+	SecretstreamState state;
 	StreamHeader streamHeader {};
 
 	int initResult = crypto_secretstream_xchacha20poly1305_init_push(
-		&state,
+		&state.get(),
 		streamHeader.data(),
-		key.data()
+		key.get().data()
 	);
 
-	sodium_memzero(key.data(), key.size());
+	key.wipe();
 
 	if (initResult != 0)
 		throw runtime_error("Could not initialize encryption stream");
@@ -153,18 +158,18 @@ void encryptSafe(istream& f, ostream& o, const string& password) {
 		isFinalChunk = f.eof() || (f.peek() == EOF);
 		if (f.bad()) throw runtime_error("Bad stream");
 
-		auto tag = isFinalChunk ? crypto_secretstream_xchacha20poly1305_TAG_FINAL : crypto_secretstream_xchacha20poly1305_TAG_MESSAGE;
+		unsigned char tag = isFinalChunk ? crypto_secretstream_xchacha20poly1305_TAG_FINAL : crypto_secretstream_xchacha20poly1305_TAG_MESSAGE;
 
-		int pushFailed = crypto_secretstream_xchacha20poly1305_push(&state, output.data(), &cipherLen, input.data(), bytesRead, header.data(), header.size(), tag);
+		int pushFailed = crypto_secretstream_xchacha20poly1305_push(&state.get(), output.data(), &cipherLen, input.data(), bytesRead, header.data(), header.size(), tag);
 		if (pushFailed) throw runtime_error("Encryption failed");
 		
-		o.write(reinterpret_cast<const char*>(output.data()), cipherLen);
+		o.write(reinterpret_cast<const char*>(output.data()), static_cast<size_t>(cipherLen));
 	}
 
 
 }
 
-void decryptSafe(istream& f, ostream& o, const string& password) {
+void decryptSafe(istream& f, AtomicOutput& o, const string& password) {
 	// validate header
 	SerialisedHeader header {};
 	f.read(reinterpret_cast<char*>(header.data()), header.size()); // read 64-bytes of f into header
@@ -217,16 +222,16 @@ void decryptSafe(istream& f, ostream& o, const string& password) {
 	if (idx != header.end()) throw logic_error("Header parsing mismatch");
 
 	// run decryption
-	Key key = deriveKey(password, salt, operationsLimit, memoryLimit);
-	crypto_secretstream_xchacha20poly1305_state state;
+	SecureKey key = deriveKey(password, salt, operationsLimit, memoryLimit);
+	SecretstreamState state;
 
 	int initResult = crypto_secretstream_xchacha20poly1305_init_pull(
-		&state,
+		&state.get(),
 		streamHeader.data(),
-		key.data()
+		key.get().data()
 	);
 
-	sodium_memzero(key.data(), key.size());
+	key.wipe();
 
 	if (initResult != 0)
 		throw ERR_invalidFile("invalid secretstream header");
@@ -248,7 +253,7 @@ void decryptSafe(istream& f, ostream& o, const string& password) {
 
 		unsigned char tag{};
 
-		int pullFailed = crypto_secretstream_xchacha20poly1305_pull(&state, plainText.data(), &plainLen, &tag, cipherText.data(), bytesRead, header.data(), header.size());
+		int pullFailed = crypto_secretstream_xchacha20poly1305_pull(&state.get(), plainText.data(), &plainLen, &tag, cipherText.data(), bytesRead, header.data(), header.size());
 		if (pullFailed) throw runtime_error("ERROR: decryption failed (wrong password or corrupted file)");
 		
 		if (tag != crypto_secretstream_xchacha20poly1305_TAG_MESSAGE && tag != crypto_secretstream_xchacha20poly1305_TAG_FINAL) throw ERR_invalidFile("unsupported auth tag");
@@ -258,9 +263,7 @@ void decryptSafe(istream& f, ostream& o, const string& password) {
 		if (authFinal && !atFileEnd) throw ERR_invalidFile("data exists after final chunk");
 		if (!authFinal && atFileEnd) throw ERR_invalidFile("missing final chunk");
 
-		o.write(reinterpret_cast<const char*>(plainText.data()), plainLen);
-
-		if (!o) throw runtime_error("Unable to write decrypted file");
+		o.write(reinterpret_cast<const char*>(plainText.data()), static_cast<size_t>(plainLen));
 	}
 
 }
@@ -272,6 +275,8 @@ int main(int argc, char* argv[]) {
 	string input;
 	string output;
 	string password;
+
+	PasswordWiper passwordWiper {password};
 
 	// op selection
 	CLI::Option_group* operations = app.add_option_group("Operation");
@@ -321,14 +326,10 @@ int main(int argc, char* argv[]) {
 		return 1;
 	}
 
-	ofstream o {output, ios::binary};
-	if (!o.is_open()){
-		cerr << "Error: could not open output file: " << output << endl;
-		return 1;
-	}
-
 	// encryption
 	try {
+		AtomicOutput o {output_path};
+
 		if (encryptRequested) {
 			encryptSafe(f,o,password);
 		} else if (decryptRequested) {
@@ -336,18 +337,11 @@ int main(int argc, char* argv[]) {
 		} else {
 			encryptUnsafe(f,o,password); // involutive so encryption == decryption
 		}
+
+		if (!f.eof()) throw runtime_error("Error: failed while reading input file.");
+		o.commit();
 	} catch (const exception& error) {
 		cerr << error.what() << endl;
-		return 1;
-	}
-
-	// post-encryption validation
-	if (!f.eof()){
-		cerr << "Error: failed while reading input file." << endl;
-		return 1;
-	}
-	if (!o){
-		cerr << "Error: failed while writing output file." << endl;
 		return 1;
 	}
 

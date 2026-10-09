@@ -6,7 +6,7 @@ Provides authenticated encryption and decryption using Argon2id and XChaCha20-Po
 
 This project is intended to explore file formats, key derivation functions, stream encryption, authentication, and cybersecurity concepts.
 
-Currently tested on and targeting **Ubuntu LTS**, but the code should compile on all major operating systems (Linux distros, Windows, macOS, BSD) as the dependencies are cross platform.
+Currently tested on and targeting **Ubuntu LTS**. The current implementation should also compile on other Linux distributions, macOS, and BSD systems with the required dependencies. Windows is not currently supported due to the use of `mkstemp` for atomic file operations.
 
 ## dependencies
 
@@ -85,12 +85,12 @@ For more information about the specific vulnerabilities, read [the unsafe mode s
 
 ## todo
 
-- [ ] docs: safe v1 file-format specification
-- [ ] docs: unsafe-mode security and limitations
-- [ ] feat: atomic file operations
+- [x] docs: safe v1 file-format specification
+- [x] docs: unsafe-mode security and limitations
+- [x] feat: atomic file operations
 - [ ] feat: hidden interactive password input
 - [ ] feat: add optional unsafe-mode parameters
-- [ ] misc: guarantee key and stream-state cleanup on error
+- [x] misc: guarantee key and stream-state cleanup on error
 - [ ] test: automated tests and v1 compatibility fixtures
 - [ ] test: cross platform compatibility
 
