@@ -12,6 +12,7 @@
 
 #include "atomic_output.cc"
 #include "secure_memory.cc"
+#include "password_input.cc"
 
 using namespace std;
 
@@ -292,7 +293,6 @@ int main(int argc, char* argv[]) {
 	// params
 	app.add_option("input", input, "Input file")->required();
 	app.add_option("output", output, "Output file")->required();
-	app.add_option("password", password, "Encryption password")->required();
 
 	CLI11_PARSE(app, argc, argv);
 
@@ -306,11 +306,6 @@ int main(int argc, char* argv[]) {
 	filesystem::path input_path {input};
 	filesystem::path output_path {output};
 	
-	if (password.empty()){
-		cerr << "Error: password cannot be empty." << endl;
-		return 1;
-	}
-
 	error_code path_error;
 	bool same_file = filesystem::equivalent(input_path, output_path, path_error);
 	bool same_path = filesystem::absolute(input_path).lexically_normal() == filesystem::absolute(output_path).lexically_normal();
@@ -328,6 +323,20 @@ int main(int argc, char* argv[]) {
 
 	// encryption
 	try {
+		password = readPassword("Password: ");
+		if (password.empty()) {
+			throw runtime_error("Error: password cannot be empty.");
+		}
+
+		if (encryptRequested) {
+			string confirmation = readPassword("Confirm password: ");
+			PasswordWiper confirmationWiper {confirmation};
+
+			if (password != confirmation) {
+				throw runtime_error("Error: passwords do not match.");
+			}
+		}
+
 		AtomicOutput o {output_path};
 
 		if (encryptRequested) {

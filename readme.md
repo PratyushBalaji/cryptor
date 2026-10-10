@@ -26,11 +26,11 @@ Note: `build-essential` is not required if a compatible C++ compiler and `make` 
 ```bash
 $ make
 ```
-Alternatively, compile directly with: `g++ -std=c++17 -Wall -Wextra -Wpedantic cryptor.cc -o cryptor -lsodium`
+Alternatively, compile directly with: `g++ -std=c++17 -Wall -Wextra -Wpedantic src/cryptor.cc -o cryptor -lsodium`
 
 3. Run `cryptor`
 ```bash
-$ ./cryptor [args] <input> <output> <password>
+$ ./cryptor [args] <input> <output>
 ```
 
 ## usage
@@ -44,17 +44,18 @@ Cryptor requires exactly one operation from:
 | `-u`, `--unsafe` | Apply the deterministic reversible transformation |
 | `-h`, `--help` | Display help |
 
-All non-help operations also require 3 positional arguments: `/path/to/input`, `/path/to/output`, `password`
+All non-help operations require two positional arguments: `/path/to/input` and `/path/to/output`.
 
 Note:
 
 - Input and output must refer to distinct files.
-- Passwords containing spaces or shell characters should be quoted.
+- Passwords are read from the controlling terminal and are not displayed.
+- Safe-mode encryption asks for the password twice to catch typing mistakes.
 
 ### safe mode
 
 ```bash
-$ ./cryptor [-e|-d] /path/to/input /path/to/output "password"
+$ ./cryptor [-e|-d] /path/to/input /path/to/output
 ```
 
 Safe mode uses Argon2id and XChaCha20-Poly1305 authenticated encryption.
@@ -66,7 +67,7 @@ Safe mode uses Argon2id and XChaCha20-Poly1305 authenticated encryption.
 
 ### unsafe mode
 ```bash
-$ ./cryptor -u /path/to/input /path/to/output "password"
+$ ./cryptor -u /path/to/input /path/to/output
 ```
 
 Unsafe mode applies a deterministic XChaCha20 XOR transformation. Applying it twice with the same password restores the original file.
@@ -88,7 +89,7 @@ For more information about the specific vulnerabilities, read [the unsafe mode s
 - [x] docs: safe v1 file-format specification
 - [x] docs: unsafe-mode security and limitations
 - [x] feat: atomic file operations
-- [ ] feat: hidden interactive password input
+- [x] feat: hidden interactive password input
 - [ ] feat: add optional unsafe-mode parameters
 - [x] misc: guarantee key and stream-state cleanup on error
 - [ ] test: automated tests and v1 compatibility fixtures
