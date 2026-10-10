@@ -276,6 +276,7 @@ int main(int argc, char* argv[]) {
 	string input;
 	string output;
 	string password;
+	string passwordFile;
 
 	PasswordWiper passwordWiper {password};
 
@@ -293,6 +294,7 @@ int main(int argc, char* argv[]) {
 	// params
 	app.add_option("input", input, "Input file")->required();
 	app.add_option("output", output, "Output file")->required();
+	app.add_option("--password-file", passwordFile, "Read password from a file instead of the terminal");
 
 	CLI11_PARSE(app, argc, argv);
 
@@ -305,6 +307,7 @@ int main(int argc, char* argv[]) {
 	// pre-encryption validation
 	filesystem::path input_path {input};
 	filesystem::path output_path {output};
+	filesystem::path password_path {passwordFile};
 	
 	error_code path_error;
 	bool same_file = filesystem::equivalent(input_path, output_path, path_error);
@@ -315,6 +318,27 @@ int main(int argc, char* argv[]) {
 		return 1;
 	}
 
+	if (!passwordFile.empty()) {
+		bool input_password_same_path = filesystem::absolute(input_path).lexically_normal()
+			== filesystem::absolute(password_path).lexically_normal();
+		bool output_password_same_path = filesystem::absolute(output_path).lexically_normal()
+			== filesystem::absolute(password_path).lexically_normal();
+
+		error_code input_password_error;
+		error_code output_password_error;
+		bool input_password_same_file = filesystem::equivalent(input_path, password_path, input_password_error);
+		bool output_password_same_file = filesystem::equivalent(output_path, password_path, output_password_error);
+
+		if (input_password_same_path || input_password_same_file) {
+			cerr << "Error: password file must not also be the input file." << endl;
+			return 1;
+		}
+		if (output_password_same_path || output_password_same_file) {
+			cerr << "Error: password file must not also be the output file." << endl;
+			return 1;
+		}
+	}
+
 	ifstream f {input, ios::binary};
 	if (!f.is_open()){
 		cerr << "Error: could not open input file: " << input << endl;
@@ -323,12 +347,16 @@ int main(int argc, char* argv[]) {
 
 	// encryption
 	try {
-		password = readPassword("Password: ");
+		if (passwordFile.empty()) {
+			password = readPassword("Password: ");
+		} else {
+			readPasswordFile(password_path, password);
+		}
 		if (password.empty()) {
 			throw runtime_error("Error: password cannot be empty.");
 		}
 
-		if (encryptRequested) {
+		if (encryptRequested && passwordFile.empty()) {
 			string confirmation = readPassword("Confirm password: ");
 			PasswordWiper confirmationWiper {confirmation};
 

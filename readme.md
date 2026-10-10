@@ -43,6 +43,7 @@ Cryptor requires exactly one operation from:
 | `-d`, `--decrypt` | Decrypt a safely encrypted file |
 | `-u`, `--unsafe` | Apply the deterministic reversible transformation |
 | `-h`, `--help` | Display help |
+| `--password-file <path>` | Read the password from a file instead of the terminal |
 
 All non-help operations require two positional arguments: `/path/to/input` and `/path/to/output`.
 
@@ -51,6 +52,8 @@ Note:
 - Input and output must refer to distinct files.
 - Passwords are read from the controlling terminal and are not displayed.
 - Safe-mode encryption asks for the password twice to catch typing mistakes.
+
+For non-interactive use, pass `--password-file <path>`. Cryptor reads the entire file and removes one trailing LF or CRLF. It warns when the file grants permissions to group or other users.
 
 ### safe mode
 
@@ -90,6 +93,7 @@ For more information about the specific vulnerabilities, read [the unsafe mode s
 - [x] docs: unsafe-mode security and limitations
 - [x] feat: atomic file operations
 - [x] feat: hidden interactive password input
+- [x] feat: password file input
 - [ ] feat: add optional unsafe-mode parameters
 - [x] misc: guarantee key and stream-state cleanup on error
 - [ ] test: automated tests and v1 compatibility fixtures

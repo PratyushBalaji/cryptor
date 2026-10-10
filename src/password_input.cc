@@ -1,10 +1,15 @@
+#include <array>
 #include <cerrno>
 #include <fcntl.h>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
 #include <stdexcept>
 #include <string>
 #include <system_error>
 
 #include <sodium.h>
+#include <sys/stat.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -105,6 +110,63 @@ string readPassword(const string& prompt) {
 	} catch (...) {
 		if (!password.empty()) sodium_memzero(password.data(), password.size());
 		sodium_memzero(buffer, sizeof(buffer));
+		throw;
+	}
+}
+
+void readPasswordFile(const filesystem::path& path, string& password) {
+	struct stat fileStatus {};
+	if (stat(path.c_str(), &fileStatus) != 0) {
+		throw system_error(errno, generic_category(), "Unable to inspect password file");
+	}
+
+	if ((fileStatus.st_mode & (S_IRWXG | S_IRWXO)) != 0) {
+		cerr << "WARNING: password file is accessible by group or other users: "
+		     << path << endl;
+	}
+
+	ifstream file {path, ios::binary};
+	if (!file.is_open()) {
+		throw runtime_error("Error: could not open password file: " + path.string());
+	}
+
+	password.clear();
+	if (fileStatus.st_size > 0) {
+		password.reserve(static_cast<size_t>(fileStatus.st_size));
+	}
+
+	array<char, 4096> buffer {};
+
+	try {
+		while (file) {
+			file.read(buffer.data(), buffer.size());
+			streamsize bytesRead = file.gcount();
+
+			if (bytesRead > 0) {
+				password.append(buffer.data(), static_cast<size_t>(bytesRead));
+			}
+		}
+
+		if (!file.eof()) {
+			throw runtime_error("Error: failed while reading password file.");
+		}
+
+		if (!password.empty() && password.back() == '\n') {
+			password.pop_back();
+			if (!password.empty() && password.back() == '\r') {
+				password.pop_back();
+			}
+		}
+
+		if (password.empty()) {
+			throw runtime_error("Error: password file is empty.");
+		}
+
+		sodium_memzero(buffer.data(), buffer.size());
+		return;
+	} catch (...) {
+		if (!password.empty()) sodium_memzero(password.data(), password.size());
+		sodium_memzero(buffer.data(), buffer.size());
 		throw;
 	}
 }
