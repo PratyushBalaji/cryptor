@@ -20,7 +20,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --yes libsodium-dev libcli11-dev
+          sudo apt-get install --yes libsodium-dev libcli11-dev util-linux
 
       - name: Build
         run: make
@@ -29,6 +29,9 @@ jobs:
         run: |
           make clean
           make CXXFLAGS="-std=c++17 -Wall -Wextra -Wpedantic -Werror"
+
+      - name: Run integration tests
+        run: make test
 
       - name: Check CLI
         run: ./cryptor --help
