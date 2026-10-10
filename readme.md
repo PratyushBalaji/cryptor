@@ -42,11 +42,16 @@ Cryptor requires exactly one operation from:
 | `-e`, `--encrypt` | Encrypt using authenticated safe mode |
 | `-d`, `--decrypt` | Decrypt a safely encrypted file |
 | `-u`, `--unsafe` | Apply the deterministic reversible transformation |
-| `-h`, `--help` | Display help |
+
+These operations require two positional arguments: `/path/to/input` and `/path/to/output`.
+
+Additional options:
+
+| Option | Description |
+|---|---|
 | `--password-file <path>` | Read the password from a file instead of the terminal |
 | `-f`, `--force` | Skip replacement confirmation prompts |
-
-All non-help operations require two positional arguments: `/path/to/input` and `/path/to/output`.
+| `-h`, `--help` | Display help |
 
 Note:
 
@@ -72,6 +77,8 @@ Safe mode uses Argon2id and XChaCha20-Poly1305 authenticated encryption.
 - Produces different ciphertext each time, even with the same file and password
 - Encryption adds a 64-byte header, and 17 authentication bytes per 64 KiB chunk
 - Recommended when protecting real files
+
+For more information, read [the safe mode specification](docs/format-v1.md).
 
 ### unsafe mode
 ```bash
