@@ -1,10 +1,11 @@
 CXX := g++
 CXXFLAGS := -std=c++17 -Wall -Wextra -Wpedantic
 
-HELPERS := atomic_output.cc secure_memory.cc
+SOURCE := src/cryptor.cc
+HELPERS := src/atomic_output.cc src/secure_memory.cc
 
-cryptor: cryptor.cc $(HELPERS)
-	$(CXX) $(CXXFLAGS) cryptor.cc -o cryptor -lsodium
+cryptor: $(SOURCE) $(HELPERS)
+	$(CXX) $(CXXFLAGS) $(SOURCE) -o cryptor -lsodium
 
 .PHONY: clean
 clean:
