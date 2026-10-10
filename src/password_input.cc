@@ -1,5 +1,6 @@
 #include <array>
 #include <cerrno>
+#include <cctype>
 #include <fcntl.h>
 #include <filesystem>
 #include <fstream>
@@ -169,4 +170,54 @@ void readPasswordFile(const filesystem::path& path, string& password) {
 		sodium_memzero(buffer.data(), buffer.size());
 		throw;
 	}
+}
+
+bool confirmAction(const string& prompt) {
+	int terminalDescriptor = open("/dev/tty", O_RDWR);
+	if (terminalDescriptor < 0) {
+		throw system_error(errno, generic_category(), "Unable to open terminal for confirmation");
+	}
+
+	string response;
+	array<char, 64> buffer {};
+
+	try {
+		writeToTerminal(terminalDescriptor, prompt);
+
+		bool finished = false;
+		while (!finished) {
+			ssize_t bytesRead = read(terminalDescriptor, buffer.data(), buffer.size());
+			if (bytesRead < 0) {
+				if (errno == EINTR) continue;
+				throw system_error(errno, generic_category(), "Unable to read confirmation");
+			}
+			if (bytesRead == 0) break;
+
+			for (ssize_t i = 0; i < bytesRead; ++i) {
+				char character = buffer[static_cast<size_t>(i)];
+				if (character == '\n' || character == '\r') {
+					finished = true;
+					break;
+				}
+				response.push_back(character);
+			}
+		}
+		close(terminalDescriptor);
+	} catch (...) {
+		close(terminalDescriptor);
+		throw;
+	}
+
+	auto first = find_if_not(response.begin(), response.end(), [](unsigned char character) {
+		return isspace(character);
+	});
+	auto last = find_if_not(response.rbegin(), response.rend(), [](unsigned char character) {
+		return isspace(character);
+	}).base();
+	string answer = first < last ? string(first, last) : string {};
+	transform(answer.begin(), answer.end(), answer.begin(), [](unsigned char character) {
+		return static_cast<char>(tolower(character));
+	});
+
+	return answer == "y" || answer == "yes";
 }

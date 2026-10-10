@@ -277,6 +277,7 @@ int main(int argc, char* argv[]) {
 	string output;
 	string password;
 	string passwordFile;
+	bool forceRequested = false;
 
 	PasswordWiper passwordWiper {password};
 
@@ -295,6 +296,7 @@ int main(int argc, char* argv[]) {
 	app.add_option("input", input, "Input file")->required();
 	app.add_option("output", output, "Output file")->required();
 	app.add_option("--password-file", passwordFile, "Read password from a file instead of the terminal");
+	app.add_flag("-f,--force", forceRequested, "Skip replacement confirmation prompts");
 
 	CLI11_PARSE(app, argc, argv);
 
@@ -308,36 +310,42 @@ int main(int argc, char* argv[]) {
 	filesystem::path input_path {input};
 	filesystem::path output_path {output};
 	filesystem::path password_path {passwordFile};
-	
-	error_code path_error;
-	bool same_file = filesystem::equivalent(input_path, output_path, path_error);
-	bool same_path = filesystem::absolute(input_path).lexically_normal() == filesystem::absolute(output_path).lexically_normal();
 
-	if (same_file || same_path){
-		cerr << "Error: input and output must be different files." << endl;
+	filesystem::path normalInput = filesystem::absolute(input_path).lexically_normal();
+	filesystem::path normalOutput = filesystem::absolute(output_path).lexically_normal();
+	bool inputOutputSamePath = normalInput == normalOutput;
+
+	error_code inputOutputError;
+	bool inputOutputSameFile = filesystem::equivalent(input_path, output_path, inputOutputError);
+	if (inputOutputSameFile && !inputOutputSamePath) {
+		cerr << "Error: different input and output paths must not refer to the same file." << endl;
 		return 1;
 	}
 
+	bool inputPasswordSamePath = false;
+	bool outputPasswordSamePath = false;
 	if (!passwordFile.empty()) {
-		bool input_password_same_path = filesystem::absolute(input_path).lexically_normal()
-			== filesystem::absolute(password_path).lexically_normal();
-		bool output_password_same_path = filesystem::absolute(output_path).lexically_normal()
-			== filesystem::absolute(password_path).lexically_normal();
+		filesystem::path normalPassword = filesystem::absolute(password_path).lexically_normal();
+		inputPasswordSamePath = normalInput == normalPassword;
+		outputPasswordSamePath = normalOutput == normalPassword;
 
-		error_code input_password_error;
-		error_code output_password_error;
-		bool input_password_same_file = filesystem::equivalent(input_path, password_path, input_password_error);
-		bool output_password_same_file = filesystem::equivalent(output_path, password_path, output_password_error);
+		error_code inputPasswordError;
+		error_code outputPasswordError;
+		bool inputPasswordSameFile = filesystem::equivalent(input_path, password_path, inputPasswordError);
+		bool outputPasswordSameFile = filesystem::equivalent(output_path, password_path, outputPasswordError);
 
-		if (input_password_same_path || input_password_same_file) {
+		if (inputPasswordSamePath || inputPasswordSameFile) {
 			cerr << "Error: password file must not also be the input file." << endl;
 			return 1;
 		}
-		if (output_password_same_path || output_password_same_file) {
-			cerr << "Error: password file must not also be the output file." << endl;
+		if (outputPasswordSameFile && !outputPasswordSamePath) {
+			cerr << "Error: different output and password-file paths must not refer to the same file." << endl;
 			return 1;
 		}
 	}
+
+	error_code outputExistsError;
+	bool outputExists = filesystem::exists(output_path, outputExistsError);
 
 	ifstream f {input, ios::binary};
 	if (!f.is_open()){
@@ -345,8 +353,30 @@ int main(int argc, char* argv[]) {
 		return 1;
 	}
 
-	// encryption
 	try {
+		if (unsafeRequested) {
+			cerr << "WARNING: unsafe mode does not authenticate passwords or file contents." << endl;
+		}
+
+		string confirmationWarning;
+		if (outputPasswordSamePath) {
+			confirmationWarning = "WARNING: output is the password file; the credential file will be replaced and may be permanently lost.";
+		} else if (inputOutputSamePath && unsafeRequested) {
+			confirmationWarning = "WARNING: unsafe in-place operation will replace the original file. Passwords cannot be verified; if the attempted password is wrong, apply that same password again before trying another.";
+		} else if (inputOutputSamePath) {
+			confirmationWarning = "WARNING: safe in-place operation will replace the original file.";
+		} else if (outputExists) {
+			confirmationWarning = "WARNING: the existing output file will be replaced.";
+		}
+
+		if (!confirmationWarning.empty()) {
+			cerr << confirmationWarning << endl;
+			if (!forceRequested && !confirmAction("Continue? [y/N]: ")) {
+				cerr << "Operation cancelled." << endl;
+				return 1;
+			}
+		}
+
 		if (passwordFile.empty()) {
 			password = readPassword("Password: ");
 		} else {

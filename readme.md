@@ -44,16 +44,21 @@ Cryptor requires exactly one operation from:
 | `-u`, `--unsafe` | Apply the deterministic reversible transformation |
 | `-h`, `--help` | Display help |
 | `--password-file <path>` | Read the password from a file instead of the terminal |
+| `-f`, `--force` | Skip replacement confirmation prompts |
 
 All non-help operations require two positional arguments: `/path/to/input` and `/path/to/output`.
 
 Note:
 
-- Input and output must refer to distinct files.
+- Passing the exact same input and output path performs an atomic in-place operation. Different paths that alias the same file through a symbolic or hard link are rejected.
 - Passwords are read from the controlling terminal and are not displayed.
 - Safe-mode encryption asks for the password twice to catch typing mistakes.
 
 For non-interactive use, pass `--password-file <path>`. Cryptor reads the entire file and removes one trailing LF or CRLF. It warns when the file grants permissions to group or other users.
+
+Cryptor asks for confirmation before replacing an existing output, performing an in-place operation or replacing the password file. Use `--force` to skip the prompt; warnings and path validation are still shown. Unsafe mode always warns that it cannot authenticate passwords or file contents.
+
+Output is written to a temporary file and atomically moved into place only after the operation succeeds. The replacement file has `0600` permissions. Existing permissions, ACLs, extended attributes and other metadata are not preserved.
 
 ### safe mode
 
