@@ -7,6 +7,10 @@ HELPERS := src/atomic_output.cc src/secure_memory.cc src/password_input.cc
 cryptor: $(SOURCE) $(HELPERS)
 	$(CXX) $(CXXFLAGS) $(SOURCE) -o cryptor -lsodium
 
-.PHONY: clean
+.PHONY: clean test
+
+test: cryptor
+	bash tests/integration.sh ./cryptor
+
 clean:
 	rm -f cryptor

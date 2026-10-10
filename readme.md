@@ -101,7 +101,7 @@ For more information about the specific vulnerabilities, read [the unsafe mode s
 - [x] feat: password file input
 - [ ] feat: add optional unsafe-mode parameters
 - [x] misc: guarantee key and stream-state cleanup on error
-- [ ] test: automated tests and v1 compatibility fixtures
+- [x] test: automated tests and v1 compatibility fixtures
 - [ ] test: cross platform compatibility
 
 ## license
