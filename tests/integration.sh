@@ -142,21 +142,43 @@ chmod 600 "$TEST_DIR/unreadable-password"
 chmod 604 "$TEST_DIR/password-lf"
 "$CRYPTOR" -u "$SOURCE" "$TEST_DIR/loose-output" --password-file "$TEST_DIR/password-lf" 2> "$TEST_DIR/loose-warning"
 assert_contains 'accessible by group or other users' "$TEST_DIR/loose-warning"
+"$CRYPTOR" -u -w "$SOURCE" "$TEST_DIR/quiet-output" --password-file "$TEST_DIR/password-lf" 2> "$TEST_DIR/quiet-warning"
+[[ ! -s "$TEST_DIR/quiet-warning" ]] || fail '--no-warnings did not suppress informational warnings'
 
 printf 'Checking confirmations and in-place operations...\n'
 printf 'existing destination\n' > "$TEST_DIR/existing-output"
 cp "$TEST_DIR/existing-output" "$TEST_DIR/existing-output.expected"
-if confirm n "$CRYPTOR" -u "$SOURCE" "$TEST_DIR/existing-output" --password-file "$PASSWORD" > "$TEST_DIR/cancel-log" 2>&1; then
+if confirm n "$CRYPTOR" -u -w "$SOURCE" "$TEST_DIR/existing-output" --password-file "$PASSWORD" > "$TEST_DIR/cancel-log" 2>&1; then
     fail 'declined replacement succeeded'
 fi
+assert_contains 'existing output file will be replaced' "$TEST_DIR/cancel-log"
 assert_contains 'Operation cancelled' "$TEST_DIR/cancel-log"
 cmp "$TEST_DIR/existing-output.expected" "$TEST_DIR/existing-output" || fail 'declined replacement changed output'
+
+for response in '' ' No '; do
+    if confirm "$response" "$CRYPTOR" -u -w "$SOURCE" "$TEST_DIR/existing-output" --password-file "$PASSWORD" > "$TEST_DIR/default-log" 2>&1; then
+        fail 'negative or default-no confirmation succeeded'
+    fi
+    cmp "$TEST_DIR/existing-output.expected" "$TEST_DIR/existing-output" || fail 'cancelled confirmation changed output'
+done
+
+confirm $'invalid\n YeS ' "$CRYPTOR" -u -w "$SOURCE" "$TEST_DIR/existing-output" --password-file "$PASSWORD" > "$TEST_DIR/affirmative-log" 2>&1
+assert_contains 'Please answer yes or no' "$TEST_DIR/affirmative-log"
+cmp "$TEST_DIR/unsafe-a" "$TEST_DIR/existing-output" || fail 'affirmative confirmation did not produce the expected output'
+
+expect_failure "$CRYPTOR" -u -w -f "$SOURCE" "$TEST_DIR/quiet-error-output" --password-file "$TEST_DIR/empty-password" 2> "$TEST_DIR/quiet-error-log"
+assert_contains 'cryptor: error:' "$TEST_DIR/quiet-error-log"
+expect_failure "$CRYPTOR" -u -w -f "$SOURCE" "$SOURCE" --password-file "$SOURCE" 2> "$TEST_DIR/quiet-validation-log"
+assert_contains 'cryptor: error:' "$TEST_DIR/quiet-validation-log"
 
 "$CRYPTOR" -u -f "$SOURCE" "$TEST_DIR/existing-output" --password-file "$PASSWORD" 2> "$TEST_DIR/force-warning"
 assert_contains 'existing output file will be replaced' "$TEST_DIR/force-warning"
 if cmp -s "$TEST_DIR/existing-output.expected" "$TEST_DIR/existing-output"; then
     fail '--force did not replace output'
 fi
+
+"$CRYPTOR" -u -w -f "$SOURCE" "$TEST_DIR/existing-output" --password-file "$PASSWORD" 2> "$TEST_DIR/quiet-force-warning"
+[[ ! -s "$TEST_DIR/quiet-force-warning" ]] || fail '--no-warnings --force did not suppress replacement warnings'
 
 cp "$SOURCE" "$TEST_DIR/safe-in-place"
 "$CRYPTOR" -e -f "$TEST_DIR/safe-in-place" "$TEST_DIR/safe-in-place" --password-file "$PASSWORD" 2> "$TEST_DIR/safe-in-place-warning"

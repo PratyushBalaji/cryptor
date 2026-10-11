@@ -12,6 +12,8 @@
 
 #include "atomic_output.cc"
 #include "secure_memory.cc"
+#include "terminal_io.cc"
+#include "console.cc"
 #include "password_input.cc"
 
 using namespace std;
@@ -127,7 +129,7 @@ void encryptSafe(istream& f, AtomicOutput& o, const string& password) {
 	key.wipe();
 
 	if (initResult != 0)
-		throw runtime_error("Could not initialize encryption stream");
+		throw runtime_error("Could not initialise encryption stream");
 	
 	// construct cryptor header
 	SerialisedHeader header {};
@@ -176,7 +178,7 @@ void decryptSafe(istream& f, AtomicOutput& o, const string& password) {
 	f.read(reinterpret_cast<char*>(header.data()), header.size()); // read 64-bytes of f into header
 	
 	auto ERR_invalidFile = [](string reason){
-		return runtime_error("Error: invalid Cryptor safe encrypted file (" + reason + ").\nIf this file was encrypted in unsafe mode, retry with --unsafe.");
+		return runtime_error("invalid Cryptor safe encrypted file (" + reason + ").\nIf this file was encrypted in unsafe mode, retry with --unsafe.");
 	};
 	
 	if (f.gcount() != 64) throw ERR_invalidFile("no header");
@@ -255,7 +257,7 @@ void decryptSafe(istream& f, AtomicOutput& o, const string& password) {
 		unsigned char tag{};
 
 		int pullFailed = crypto_secretstream_xchacha20poly1305_pull(&state.get(), plainText.data(), &plainLen, &tag, cipherText.data(), bytesRead, header.data(), header.size());
-		if (pullFailed) throw runtime_error("ERROR: decryption failed (wrong password or corrupted file)");
+		if (pullFailed) throw runtime_error("decryption failed (wrong password or corrupted file)");
 		
 		if (tag != crypto_secretstream_xchacha20poly1305_TAG_MESSAGE && tag != crypto_secretstream_xchacha20poly1305_TAG_FINAL) throw ERR_invalidFile("unsupported auth tag");
 
@@ -278,6 +280,7 @@ int main(int argc, char* argv[]) {
 	string password;
 	string passwordFile;
 	bool forceRequested = false;
+	bool noWarningsRequested = false;
 
 	PasswordWiper passwordWiper {password};
 
@@ -297,12 +300,14 @@ int main(int argc, char* argv[]) {
 	app.add_option("output", output, "Output file")->required();
 	app.add_option("--password-file", passwordFile, "Read password from a file instead of the terminal");
 	app.add_flag("-f,--force", forceRequested, "Skip replacement confirmation prompts");
+	app.add_flag("-w,--no-warnings", noWarningsRequested, "Suppress warnings unless confirmation is required");
 
 	CLI11_PARSE(app, argc, argv);
+	Console console {!noWarningsRequested};
 
 	// keygen dep check
 	if (sodium_init() < 0) {
-		cerr << "Error: could not initialize libsodium." << endl;
+		console.error("could not initialize libsodium.");
 		return 1;
 	}
 	
@@ -318,7 +323,7 @@ int main(int argc, char* argv[]) {
 	error_code inputOutputError;
 	bool inputOutputSameFile = filesystem::equivalent(input_path, output_path, inputOutputError);
 	if (inputOutputSameFile && !inputOutputSamePath) {
-		cerr << "Error: different input and output paths must not refer to the same file." << endl;
+		console.error("different input and output paths must not refer to the same file.");
 		return 1;
 	}
 
@@ -335,11 +340,11 @@ int main(int argc, char* argv[]) {
 		bool outputPasswordSameFile = filesystem::equivalent(output_path, password_path, outputPasswordError);
 
 		if (inputPasswordSamePath || inputPasswordSameFile) {
-			cerr << "Error: password file must not also be the input file." << endl;
+			console.error("password file must not also be the input file.");
 			return 1;
 		}
 		if (outputPasswordSameFile && !outputPasswordSamePath) {
-			cerr << "Error: different output and password-file paths must not refer to the same file." << endl;
+			console.error("different output and password-file paths must not refer to the same file.");
 			return 1;
 		}
 	}
@@ -349,30 +354,31 @@ int main(int argc, char* argv[]) {
 
 	ifstream f {input, ios::binary};
 	if (!f.is_open()){
-		cerr << "Error: could not open input file: " << input << endl;
+		console.error("could not open input file: " + input);
 		return 1;
 	}
 
 	try {
 		if (unsafeRequested) {
-			cerr << "WARNING: unsafe mode does not authenticate passwords or file contents." << endl;
+			console.warn("unsafe mode does not authenticate passwords or file contents.");
 		}
 
 		string confirmationWarning;
 		if (outputPasswordSamePath) {
-			confirmationWarning = "WARNING: output is the password file; the credential file will be replaced and may be permanently lost.";
+			confirmationWarning = "output is the password file; the credential file will be replaced and may be permanently lost.";
 		} else if (inputOutputSamePath && unsafeRequested) {
-			confirmationWarning = "WARNING: unsafe in-place operation will replace the original file. Passwords cannot be verified; if the attempted password is wrong, apply that same password again before trying another.";
+			confirmationWarning = "unsafe in-place operation will replace the original file. Passwords cannot be verified; if the attempted password is wrong, apply that same password again before trying another.";
 		} else if (inputOutputSamePath) {
-			confirmationWarning = "WARNING: safe in-place operation will replace the original file.";
+			confirmationWarning = "safe in-place operation will replace the original file.";
 		} else if (outputExists) {
-			confirmationWarning = "WARNING: the existing output file will be replaced.";
+			confirmationWarning = "the existing output file will be replaced.";
 		}
 
 		if (!confirmationWarning.empty()) {
-			cerr << confirmationWarning << endl;
-			if (!forceRequested && !confirmAction("Continue? [y/N]: ")) {
-				cerr << "Operation cancelled." << endl;
+			if (forceRequested) {
+				console.warn(confirmationWarning);
+			} else if (!console.confirm(confirmationWarning)) {
+				console.error("Operation cancelled.");
 				return 1;
 			}
 		}
@@ -380,10 +386,10 @@ int main(int argc, char* argv[]) {
 		if (passwordFile.empty()) {
 			password = readPassword("Password: ");
 		} else {
-			readPasswordFile(password_path, password);
+			readPasswordFile(password_path, password, console);
 		}
 		if (password.empty()) {
-			throw runtime_error("Error: password cannot be empty.");
+			throw runtime_error("password cannot be empty.");
 		}
 
 		if (encryptRequested && passwordFile.empty()) {
@@ -391,7 +397,7 @@ int main(int argc, char* argv[]) {
 			PasswordWiper confirmationWiper {confirmation};
 
 			if (password != confirmation) {
-				throw runtime_error("Error: passwords do not match.");
+				throw runtime_error("passwords do not match.");
 			}
 		}
 
@@ -405,10 +411,10 @@ int main(int argc, char* argv[]) {
 			encryptUnsafe(f,o,password); // involutive so encryption == decryption
 		}
 
-		if (!f.eof()) throw runtime_error("Error: failed while reading input file.");
+		if (!f.eof()) throw runtime_error("failed while reading input file.");
 		o.commit();
 	} catch (const exception& error) {
-		cerr << error.what() << endl;
+		console.error(error.what());
 		return 1;
 	}
 

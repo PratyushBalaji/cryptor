@@ -51,6 +51,7 @@ Additional options:
 |---|---|
 | `--password-file <path>` | Read the password from a file instead of the terminal |
 | `-f`, `--force` | Skip replacement confirmation prompts |
+| `-w`, `--no-warnings` | Suppress non-essential warnings |
 | `-h`, `--help` | Display help |
 
 Note:
@@ -61,7 +62,7 @@ Note:
 
 For non-interactive use, pass `--password-file <path>`. Cryptor reads the entire file and removes one trailing LF or CRLF. It warns when the file grants permissions to group or other users.
 
-Cryptor asks for confirmation before replacing an existing output, performing an in-place operation or replacing the password file. Use `--force` to skip the prompt; warnings and path validation are still shown. Unsafe mode always warns that it cannot authenticate passwords or file contents.
+Cryptor asks for confirmation before replacing an existing output, performing an in-place operation or replacing the password file. Use `--force` to skip the prompt. Use `--no-warnings` to suppress informational warnings; confirmation warnings remain visible unless `--force` and `--no-warnings` are used together. Errors and path-validation failures are always shown.
 
 Output is written to a temporary file and atomically moved into place only after the operation succeeds. The replacement file has `0600` permissions. Existing permissions, ACLs, extended attributes and other metadata are not preserved.
 
